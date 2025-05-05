@@ -20,7 +20,7 @@ st.set_page_config(
 AUTH0_CLIENT_ID = st.secrets["auth0"]["client_id"]
 AUTH0_CLIENT_SECRET = st.secrets["auth0"]["client_secret"]
 AUTH0_DOMAIN = st.secrets["auth0"]["domain"]
-REDIRECT_URI = "http://10.10.21.53:8501/"
+REDIRECT_URI = "https://appdashtest-lzsmprquavs63f55ry93sr.streamlit.app/"
 
 # --- URLs de Auth0 ---
 AUTH0_AUTHORIZE_URL = f"https://{AUTH0_DOMAIN}/authorize"
