@@ -3,6 +3,11 @@ from sqlalchemy import create_engine
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+from urllib.parse import urlencode
+import requests
+import time
+from dotenv import load_dotenv
+import os
 
 # --- Configurar página ---
 st.set_page_config(
@@ -11,6 +16,97 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# --- Leer secretos ---
+AUTH0_CLIENT_ID = os.getenv('AUTH0_CLIENT_ID')
+AUTH0_CLIENT_SECRET = os.getenv('AUTH0_CLIENT_SECRET')
+AUTH0_DOMAIN = os.getenv('AUTH0_DOMAIN')
+REDIRECT_URI = "http://10.10.21.53:8501"
+
+# --- URLs de Auth0 ---
+AUTH0_AUTHORIZE_URL = f"https://{AUTH0_DOMAIN}/authorize"
+AUTH0_TOKEN_URL = f"https://{AUTH0_DOMAIN}/oauth/token"
+AUTH0_USERINFO_URL = f"https://{AUTH0_DOMAIN}/userinfo"
+AUTH0_LOGOUT_URL = f"https://{AUTH0_DOMAIN}/v2/logout"
+
+# --- Función para construir URL de login ---
+def build_login_url():
+    return AUTH0_AUTHORIZE_URL + "?" + urlencode({
+        "response_type": "code",
+        "client_id": AUTH0_CLIENT_ID,
+        "redirect_uri": REDIRECT_URI,
+        "scope": "openid profile email",
+    })
+
+# --- Función para obtener el token de acceso ---
+def get_token(code):
+    data = {
+        "grant_type": "authorization_code",
+        "client_id": AUTH0_CLIENT_ID,
+        "client_secret": AUTH0_CLIENT_SECRET,
+        "code": code,
+        "redirect_uri": REDIRECT_URI,
+    }
+    response = requests.post(AUTH0_TOKEN_URL, data=data)
+    return response.json()
+
+# --- Función para obtener el perfil del usuario ---
+def get_user_info(token):
+    headers = {"Authorization": f"Bearer {token}"}
+    response = requests.get(AUTH0_USERINFO_URL, headers=headers)
+    return response.json()
+
+# --- Autenticación manual ---
+code = st.query_params.get("code")
+
+if "user" not in st.session_state and code:
+    token_data = get_token(code)
+    access_token = token_data.get("access_token")
+    if access_token:
+        user_info = get_user_info(access_token)
+        st.session_state.user = user_info
+        st.query_params.clear()  # Limpia parámetros en URL tras login
+
+
+# --- Si no estás autenticado, muestra login ---
+if "user" not in st.session_state:
+    
+    st.title("Bienvenido al Dashboard de Pedidos Cancelados")
+    st.markdown("Para acceder, inicia sesión con el siguiente botón:")
+    login_url = build_login_url()
+    st.markdown(f"[🔐 Iniciar sesión con Auth0]({login_url})", unsafe_allow_html=True)
+    st.stop()
+
+# --- Botón cerrar sesión ---
+logout_url = AUTH0_LOGOUT_URL + "?" + urlencode({
+    "returnTo": REDIRECT_URI,
+    "client_id": AUTH0_CLIENT_ID
+})
+
+
+
+with st.sidebar:
+    
+    if "user" in st.session_state:
+        st.markdown(f"""
+    <div style='display: flex; flex-direction: column; align-items: center;'>
+        <img src="{st.session_state.user['picture']}" 
+             style="border-radius: 50%; width: 100px; height: 100px; object-fit: cover;"/>
+        <p style='margin-top: 10px; font-weight: bold;'>{st.session_state.user['name']}</p>
+    </div>
+""", unsafe_allow_html=True)
+    
+    if st.button("Cerrar sesión", use_container_width=True):
+        st.markdown(f'<meta http-equiv="refresh" content="0;URL=\'{logout_url}\'" />', unsafe_allow_html=True)
+    
+
+# --- Mostrar mensaje de bienvenida temporal ---
+if "welcome_shown" not in st.session_state:
+    welcome_placeholder = st.empty()
+    welcome_placeholder.success(f"Bienvenido, {st.session_state.user['name']} 👋")
+    time.sleep(5)
+    welcome_placeholder.empty()
+    st.session_state.welcome_shown = True  # Evita que vuelva a mostrarse
 
 # --- Función para crear el gráfico de dona ---
 def donut_plotly(percentage, color_palette):
@@ -44,154 +140,16 @@ def donut_plotly(percentage, color_palette):
 
     return fig
 # Crear motor SQLAlchemy a partir de la URL del archivo secrets.toml
-engine = create_engine(st.secrets["connections"]["sql"]["ebs12"])
+engine = create_engine(os.getenv('ebs12'))
 
 # Consulta con cacheo
 @st.cache_data(ttl=120)  # Cachea por 10 minutos
 def obtener_datos():
-    query = r"""
-    
-Select 
-	ooha.HEADER_ID,
-	RCTA.PURCHASE_ORDER		AS OCC,
-	OOHA.ORDER_NUMBER		AS [No PEDIDO ORACLE],
-	HAOU.NAME				AS ALMACEN,
-	HPSF.PARTY_SITE_NUMBER	AS CLIENTE_FACTURACION,
-    HPS.PARTY_SITE_NUMBER	AS CLIENTE_ENTREGA,
-    HP.PARTY_NAME			AS CLIENTE,
-	HP.Party_ID				AS Party_ID,
-	client.Formato			AS FORMATO,
-	client.Canal			AS CANAL,
-	OOHA.PRICING_DATE		AS [FECHA OC],
-	OOHA.ATTRIBUTE6			AS [FECHA ENTREGA],
-	OOHA.ATTRIBUTE1			AS [FECHA CANCELACION],
-	OOLA.LINE_NUMBER		AS LINEA,
-	MSIB.SEGMENT1			AS SKU,
-	MSIB.DESCRIPTION		AS DESCRIPCION,
-	pro.[Unidad de Negocio]	AS FAMILIA,
-	PRO.[Factor Conversion]	AS [Factor Conversion],
-	Muc.CONVERSION_RATE		AS [Tarimas a cajas],
-	OOLA.ORDER_QUANTITY_UOM	AS UDM,
-	ISNULL(Muc.CONVERSION_RATE,	1) * (COALESCE(RCTL.QUANTITY_CREDITED, 0) + COALESCE(RCTL.QUANTITY_INVOICED, 0)) AS [CANTIDAD FACTURADA],
-	ISNULL(Muc.CONVERSION_RATE,	1) * (OOLA.ORDERED_QUANTITY)	AS [CANTIDAD ORDENADA],
-	ISNULL(Muc.CONVERSION_RATE,	1) * (OOLA.CANCELLED_QUANTITY)	AS	[CANTIDAD CANCELADA],
-	--ISNULL(FND.LOOKUP_CODE, FND.LOOKUP_CODE) AS [CODIGO MOTIVO],
-	--ISNULL(FND.DESCRIPTION, FND.DESCRIPTION) AS [MOTIVO CANCELACION],
-	FND.LOOKUP_CODE AS CODIGO_MOTIVO,
-	FND.DESCRIPTION AS MOTIVO_CANCELACION,
- 
-	TL.NAME					AS [TIPO PEDIDO],
-	OOHA.CREATION_DATE		AS [FECHA CREACION],
-	RCTA.TRX_NUMBER			AS FACTURA,
-	RCTA.TRX_DATE			AS [FECHA FACTURA]
- 
- 
- 
-from
-RA_CUSTOMER_TRX_ALL RCTA
-LEFT JOIN RA_CUST_TRX_TYPES_ALL			RCTTA	ON RCTTA.CUST_TRX_TYPE_ID = RCTA.CUST_TRX_TYPE_ID  
-LEFT JOIN RA_CUSTOMER_TRX_LINES_ALL		RCTL	ON RCTL.CUSTOMER_TRX_ID = RCTA.CUSTOMER_TRX_ID 
-LEFT JOIN OE_ORDER_LINES_ALL			OOLA	ON OOLA.LINE_ID = RCTL.INTERFACE_LINE_ATTRIBUTE6
-LEFT JOIN OE_ORDER_HEADERS_ALL			OOHA	ON OOHA.HEADER_ID = OOLA.HEADER_ID
-LEFT JOIN OE_TRANSACTION_TYPES_TL		TL		ON TL.TRANSACTION_TYPE_ID = OOHA.ORDER_TYPE_ID and TL.LANGUAGE = 'ESA'
-LEFT JOIN MTL_SYSTEM_ITEMS_B			MSIB	ON MSIB.INVENTORY_ITEM_ID	= RCTL.INVENTORY_ITEM_ID AND MSIB.ORGANIZATION_ID = 101
-LEFT JOIN HR_ALL_ORGANIZATION_UNITS		HAOU	ON HAOU.ORGANIZATION_ID = OOLA.SHIP_FROM_ORG_ID
-LEFT JOIN HZ_CUST_SITE_USES_ALL			HCSUA	ON HCSUA.SITE_USE_ID = OOHA.SHIP_TO_ORG_ID 
-LEFT JOIN HZ_CUST_ACCT_SITES_ALL		HCAS	ON HCAS.CUST_ACCT_SITE_ID = HCSUA.CUST_ACCT_SITE_ID 
-LEFT JOIN HZ_PARTY_SITES				HPS		ON HPS.PARTY_SITE_ID = HCAS.PARTY_SITE_ID
-left JOIN HZ_PARTIES					HP		ON HP.PARTY_ID = HPS.PARTY_ID 
-left JOIN HZ_CUST_SITE_USES_ALL			HCSUAF	ON HCSUAF.SITE_USE_ID = OOHA.INVOICE_TO_ORG_ID 
-left JOIN HZ_CUST_ACCT_SITES_ALL		HCASF   ON HCASF.CUST_ACCT_SITE_ID = HCSUAF.CUST_ACCT_SITE_ID 
-Left JOIN HZ_PARTY_SITES				HPSF    ON HPSF.PARTY_SITE_ID = HCASF.PARTY_SITE_ID 
-left JOIN HZ_PARTIES					HPF		ON HPF.PARTY_ID = HPSF.PARTY_ID 
-left JOIN HZ_CUST_ACCOUNTS				HCA		ON HCA.CUST_ACCOUNT_ID = HCAS.CUST_ACCOUNT_ID 
-Left Join [PICO_VENTAS].[dbo].[clientes] client On client.[No_] = HPS.PARTY_SITE_NUMBER
-left Join [PICO_VENTAS].[dbo].[productos] pro 	ON pro.[No_] = MSIB.SEGMENT1
-Left Join MTL_UOM_CONVERSIONS			MUC		On Muc.[UOM_CODE] = RCTL.UOM_CODE and Muc.[INVENTORY_ITEM_ID] = RCTL.[INVENTORY_ITEM_ID]
-LEFT JOIN FND_LOOKUP_VALUES				FND		ON FND.LOOKUP_CODE= RCTA.REASON_CODE AND FND.LANGUAGE = 'ESA' AND FND.VIEW_APPLICATION_ID = RCTA.PROGRAM_APPLICATION_ID AND FND.DESCRIPTION IS NOT NULL
- 
- 
- 
-where (RCTL.QUANTITY_CREDITED IS NOT NULL OR RCTL.QUANTITY_INVOICED IS NOT NULL)
-and CONVERT(DATETIME, CONVERT(DATE, OOHA.CREATION_DATE)) > '01-01-2022'
 
-and RCTA.ORG_ID = 81
-AND OOHA.ORG_ID = 81
- 
- 
-UNION
- 
- 
-
- 
-SELECT DISTINCT 
-	OOHA.HEADER_ID,
-	OOLA.CUST_PO_NUMBER			AS		OCC,
-	OOHA.ORDER_NUMBER			AS		[No PEDIDO ORACLE],
-	HAOU.NAME					AS		ALMACEN,
-	HPSF.PARTY_SITE_NUMBER		AS		CLIENTE_FACTURACION,
-    HPS.PARTY_SITE_NUMBER		AS		CLIENTE_ENTREGA,
-    HP.PARTY_NAME				AS		CLIENTE,
-	HP.Party_ID					AS		Party_ID,
-	client.Formato				AS		FORMATO,
-	client.Canal				AS		CANAL,
-	OOHA.PRICING_DATE			AS		[FECHA OC],
-	OOHA.ATTRIBUTE6				AS		[FECHA ENTREGA],
-	OOHA.ATTRIBUTE1				AS		[FECHA CANCELACION],
-	OOLA.LINE_NUMBER			AS		LINEA,
-	MSIB.SEGMENT1				AS		SKU,
-	MSIB.DESCRIPTION			AS		DESCRIPCION,
-	pro.[Unidad de Negocio]		AS		FAMILIA,
-	PRO.[Factor Conversion]		AS		[Factor Conversion],
-	Muc.CONVERSION_RATE			AS [Tarimas a cajas],
-	OOLA.ORDER_QUANTITY_UOM	AS UDM,
-	NULL						AS		[CANTIDAD FACTURADA],
-	NULL						AS		[CANTIDAD ORDENADA],
-	ISNULL(Muc.CONVERSION_RATE,	1) * (OOLA.CANCELLED_QUANTITY)	AS	[CANTIDAD CANCELADA],
-	FND.LOOKUP_CODE				AS		[CODIGO MOTIVO],
-	FND.DESCRIPTION				AS		[MOTIVO CANCELACION],
- 
- 
- 
-	TL.NAME						AS		[TIPO PEDIDO],
-	OOLA.CREATION_DATE			AS		[FECHA_CREACION],
-	NULL						AS		FACTURA,
-	NULL						AS		[FECHA FACTURA]
- 
- 
-
- 
- 
-FROM OE_ORDER_LINES_ALL OOLA
-LEFT JOIN OE_ORDER_HEADERS_ALL			OOHA	ON OOHA.HEADER_ID = OOLA.HEADER_ID
-LEFT JOIN MTL_SYSTEM_ITEMS_B			MSIB	ON MSIB.INVENTORY_ITEM_ID	= OOLA.INVENTORY_ITEM_ID AND MSIB.ORGANIZATION_ID = 101
-left JOIN OE_TRANSACTION_TYPES_TL		TL		ON TL.TRANSACTION_TYPE_ID = OOHA.ORDER_TYPE_ID and TL.LANGUAGE = 'ESA'
-LEFT JOIN HR_ALL_ORGANIZATION_UNITS		HAOU	ON HAOU.ORGANIZATION_ID = OOLA.SHIP_FROM_ORG_ID
-LEFT JOIN HZ_CUST_SITE_USES_ALL			HCSUA	ON HCSUA.SITE_USE_ID = OOHA.SHIP_TO_ORG_ID 
-LEFT JOIN HZ_CUST_ACCT_SITES_ALL		HCAS	ON HCAS.CUST_ACCT_SITE_ID = HCSUA.CUST_ACCT_SITE_ID 
-LEFT JOIN HZ_PARTY_SITES				HPS		ON HPS.PARTY_SITE_ID = HCAS.PARTY_SITE_ID
-left JOIN HZ_PARTIES					HP		ON HP.PARTY_ID = HPS.PARTY_ID 
-left JOIN HZ_CUST_SITE_USES_ALL			HCSUAF	ON HCSUAF.SITE_USE_ID = OOHA.INVOICE_TO_ORG_ID 
-left JOIN HZ_CUST_ACCT_SITES_ALL		HCASF   ON HCASF.CUST_ACCT_SITE_ID = HCSUAF.CUST_ACCT_SITE_ID 
-Left JOIN HZ_PARTY_SITES				HPSF    ON HPSF.PARTY_SITE_ID = HCASF.PARTY_SITE_ID 
-left JOIN HZ_PARTIES					HPF		ON HPF.PARTY_ID = HPSF.PARTY_ID 
-left JOIN HZ_CUST_ACCOUNTS				HCA		ON HCA.CUST_ACCOUNT_ID = HCAS.CUST_ACCOUNT_ID 
-Left Join [PICO_VENTAS].[dbo].[clientes] client On client.[No_] = HPS.PARTY_SITE_NUMBER
-left Join [PICO_VENTAS].[dbo].[productos] pro 	ON pro.[No_] = MSIB.SEGMENT1
-Left Join MTL_UOM_CONVERSIONS			MUC		On Muc.[UOM_CODE] = OOLA.ORDER_QUANTITY_UOM and Muc.[INVENTORY_ITEM_ID] = OOLA.[INVENTORY_ITEM_ID]
-LEFT JOIN OE_REASONS					REA		On REA.HEADER_ID = OOHA.HEADER_ID AND REA.ENTITY_ID = OOLA.LINE_ID
-inner JOIN FND_LOOKUP_VALUES			FND		ON FND.LOOKUP_CODE = REA.REASON_CODE AND FND.LANGUAGE = 'ESA'  AND FND.LOOKUP_TYPE = 'CANCEL_CODE'
- 
- 
-WHERE OOLA.FLOW_STATUS_CODE = 'CANCELLED'
-and OOLA.ORG_ID = 81
-and CONVERT(DATETIME, CONVERT(DATE, OOHA.CREATION_DATE)) > '01-01-2022'
-    
-    
-    
-    """
-    with engine.connect() as connection:
-        return pd.read_sql(query, connection)
+    url_api = "http://127.0.0.1:8000/datos"  # url de la api que se consumira
+    response = requests.get(url_api)
+    response.raise_for_status()
+    return pd.DataFrame(response.json())
 
 df = obtener_datos()
 
@@ -200,8 +158,9 @@ df = obtener_datos()
 df['FECHA CREACION'] = pd.to_datetime(df['FECHA CREACION'])
 
 # --- Sidebar ---
-st.sidebar.image('https://cdn-icons-png.flaticon.com/512/483/483361.png', width=50)
-st.sidebar.title('Título Sidebar')
+#st.sidebar.title('Título Sidebar')
+#st.sidebar.image('https://iscam.com/wp-content/uploads/2023/11/Logo-Pinsa.png', width=100)
+st.sidebar.markdown("<img src='https://iscam.com/wp-content/uploads/2023/11/Logo-Pinsa.png' width='100' style='display: block; margin: 0 auto;'>" , unsafe_allow_html=True)
 st.sidebar.header("⚙️ Configurar filtros")
 
 # --- Filtros ---
@@ -211,7 +170,7 @@ almacenes = sorted(df['ALMACEN'].unique())
 clientes = sorted(df['CLIENTE'].fillna('Sin cliente').unique())
 familia = sorted(df['FAMILIA'].unique())
 
-fil_año = st.sidebar.selectbox('Año', options=años, index=0)
+fil_año = st.sidebar.selectbox('Año', options=años, index=len(años) - 1)
 fil_mes = st.sidebar.selectbox('Mes', options=meses, index=0)
 
 opciones_almacenes = ["Todos"] + almacenes
@@ -304,4 +263,11 @@ fig_top_clientes.update_traces(
 
 # --- Mostrar el gráfico ---
 st.markdown("<h3 style='text-align: center;'>📊 Top 10 Clientes por Cantidad Ordenada</h3>", unsafe_allow_html=True)
+# --- Métricas secundarias orientacion  ---
+col1, col2 = st.columns(2)
+
+col1.metric("AÑO", f"{fil_año:}")
+col2.metric("MES", f"{fil_mes:}")
+
+# --------SE MUESTRA EL GRAFICO DE BARRAS CON LOS TOP 10 CLIENTES--------------#
 st.plotly_chart(fig_top_clientes, use_container_width=True)
