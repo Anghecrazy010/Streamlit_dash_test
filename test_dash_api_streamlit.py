@@ -139,7 +139,7 @@ def donut_plotly(percentage, color_palette):
 
     return fig
 # Crear motor SQLAlchemy a partir de la URL del archivo secrets.toml
-engine = create_engine(os.getenv('ebs12'))
+engine = create_engine(st.secrets['conn']['ebs12'])
 
 # Consulta con cacheo
 @st.cache_data(ttl=120)  # Cachea por 10 minutos
