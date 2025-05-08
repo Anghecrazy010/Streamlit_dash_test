@@ -163,7 +163,7 @@ with engine.connect() as connection:
 
 # --- SUBIR A GOOGLE DRIVE ---
 # Ruta a tu archivo de credenciales JSON
-SERVICE_ACCOUNT_FILE = '\\Users\\anghelo.rodriguez\\Downloads\\json-drive-api\\streamlit-report-file-aba00dab8d4d.json'
+SERVICE_ACCOUNT_FILE = json.loads(os.getenv("SERVICE_ACCOUNT_JSON"))
 
 # Scopes necesarios
 SCOPES = ['https://www.googleapis.com/auth/drive']
