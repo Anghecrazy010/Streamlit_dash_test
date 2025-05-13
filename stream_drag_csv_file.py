@@ -5,6 +5,8 @@ import plotly.express as px
 from urllib.parse import urlencode
 import requests
 import time
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
 
 
 # --- Configurar página ---
@@ -19,7 +21,7 @@ st.set_page_config(
 AUTH0_CLIENT_ID = st.secrets["auth0"]["client_id"]
 AUTH0_CLIENT_SECRET = st.secrets["auth0"]["client_secret"]
 AUTH0_DOMAIN = st.secrets["auth0"]["domain"]
-REDIRECT_URI = "https://dash-drag-csv-file.streamlit.app/"
+REDIRECT_URI = "https://dash-down-drag-csv-file.streamlit.app/"
 
 # --- URLs de Auth0 ---
 AUTH0_AUTHORIZE_URL = f"https://{AUTH0_DOMAIN}/authorize"
@@ -137,6 +139,58 @@ def donut_plotly(percentage, color_palette):
     )
 
     return fig
+
+#Configuración
+SERVICE_ACCOUNT_FILE = st.secrets['drive']['json_file'] # Actualiza esta ruta
+SCOPES = ['https://www.googleapis.com/auth/drive']
+FOLDER_ID = st.secrets["drive"]["folder_id"]  # Asegúrate de que sea el correcto
+
+# Autenticación
+credentials = service_account.Credentials.from_service_account_file(
+    SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+drive_service = build('drive', 'v3', credentials=credentials)
+
+# Obtener archivo único en la carpeta
+def get_single_file_id(service, folder_id):
+    query = f"'{folder_id}' in parents and trashed = false"
+    result = service.files().list(q=query, fields="files(id, name)").execute()
+    files = result.get('files', [])
+    
+    if not files:
+        return None, "❌ No hay archivos en la carpeta."
+    elif len(files) > 1:
+        return None, "⚠️ Hay más de un archivo en la carpeta."
+    else:
+        return files[0]['id'], files[0]['name']
+
+# Streamlit UI
+st.title("📁 Descarga de Archivo desde Google Drive")
+
+file_id, message = get_single_file_id(drive_service, FOLDER_ID)
+
+if file_id:
+    download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    st.success(f"Archivo disponible: {message}")
+    st.markdown(
+        f"""
+        <a href="{download_url}" target="_blank">
+            <button style="
+                background-color:#4CAF50;
+                color:white;
+                padding:10px 16px;
+                border:none;
+                border-radius:5px;
+                cursor:pointer;
+                font-size:16px;">
+                Descargar archivo
+            </button>
+        </a>
+        """,
+        unsafe_allow_html=True
+    )
+else:
+    st.warning(message)
+
 
 # --- Cargar archivo CSV ---
 st.header("📁 Subir archivo CSV")
