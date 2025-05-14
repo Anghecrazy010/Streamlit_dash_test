@@ -146,7 +146,7 @@ SCOPES = ['https://www.googleapis.com/auth/drive']
 FOLDER_ID = st.secrets["drive"]["folder_id"]  # Asegúrate de que sea el correcto
 
 # Autenticación
-credentials = service_account.Credentials.from_service_account_file(
+credentials = service_account.Credentials.from_service_account_info(
     SERVICE_ACCOUNT_FILE, scopes=SCOPES)
 drive_service = build('drive', 'v3', credentials=credentials)
 
