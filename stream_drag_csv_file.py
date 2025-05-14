@@ -141,13 +141,12 @@ def donut_plotly(percentage, color_palette):
     return fig
 
 #Configuración
-SERVICE_ACCOUNT_FILE = st.secrets['json_file'] # Actualiza esta ruta
 SCOPES = ['https://www.googleapis.com/auth/drive']
 FOLDER_ID = st.secrets["drive"]["folder_id"]  # Asegúrate de que sea el correcto
 
 # Autenticación
 credentials = service_account.Credentials.from_service_account_info(
-    SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+    dict(st.secrets["json_file"]), scopes=SCOPES)
 drive_service = build('drive', 'v3', credentials=credentials)
 
 # Obtener archivo único en la carpeta
