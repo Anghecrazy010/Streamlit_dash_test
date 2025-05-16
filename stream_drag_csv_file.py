@@ -212,12 +212,6 @@ else:
   # Asegurar que fecha sea datetime
 df['FECHA CREACION'] = pd.to_datetime(df['FECHA CREACION'])
 
-# --- Sidebar ---
-#st.sidebar.title('Título Sidebar')
-#st.sidebar.image('https://iscam.com/wp-content/uploads/2023/11/Logo-Pinsa.png', width=100)
-st.sidebar.markdown("<img src='https://iscam.com/wp-content/uploads/2023/11/Logo-Pinsa.png' width='100' style='display: block; margin: 0 auto;'>" , unsafe_allow_html=True)
-st.sidebar.header("⚙️ Configurar filtros")
-
 # Mostrar meses
 mes_nombre = {1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril", 5: "Mayo", 6: "Junio",
               7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"}
@@ -402,19 +396,9 @@ fig_top_clientes.update_traces(
 st.markdown("<h3 style='text-align: center;'>📊 Top 10 Clientes por Cantidad Ordenada</h3>", unsafe_allow_html=True)
 st.plotly_chart(fig_top_clientes, use_container_width=True)
 
-# --- Botones de control (reset y refrescar) fuera del sidebar ---
-st.markdown("---")
-st.subheader("🔧 Controles de visualización")
-
-col1= st.columns(1)
-
-with col1:
-    if st.button("🔁 Resetear filtros", use_container_width=True):
-        st.query_params.update({"reset_filtros": "1"})
-        st.rerun()
 
 # --- Mostrar año y mes seleccionados ---
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 
 # Mostrar años
 if "Todos" in st.session_state.fil_años or len(fil_años) == len(años):
@@ -430,3 +414,9 @@ else:
 
 col1.metric("AÑO", año_mostrar)
 col2.metric("MES", mes_mostrar)
+# --- Botones de control (reset y refrescar) fuera del sidebar ---
+
+with col3:
+    if st.button("🔁 Resetear filtros", use_container_width=True):
+        st.query_params.update({"reset_filtros": "1"})
+        st.rerun()
