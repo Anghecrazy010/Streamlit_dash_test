@@ -280,12 +280,12 @@ st.sidebar.markdown(
 
 # --- Selectores visibles ---
 
-fil_años_sel = st.sidebar.multiselect("Año", options=opciones_años, default=st.session_state.fil_años, key="fil_años")
-fil_meses_nombres = st.sidebar.multiselect("Mes", options=opciones_meses, default=st.session_state.fil_meses, key="fil_meses")
-#fil_meses_sel = st.sidebar.multiselect("Mes", options=opciones_meses, default=st.session_state.fil_meses, key="fil_meses")
-fil_al = st.sidebar.multiselect("Almacén", options=opciones_almacenes, default=st.session_state.fil_al, key="fil_al")
-fil_cli = st.sidebar.multiselect("Clientes", options=opciones_clientes, default=st.session_state.fil_cli, key="fil_cli")
-fil_fa = st.sidebar.multiselect("Familia", options=opciones_familia, default=st.session_state.fil_fa, key="fil_fa")
+#fil_años_sel = st.sidebar.multiselect("Año", options=opciones_años, default=st.session_state.fil_años, key="fil_años")
+fil_años_sel = st.sidebar.multiselect("Año", options=opciones_años, key="fil_años")
+fil_meses_nombres = st.sidebar.multiselect("Mes", options=opciones_meses, key="fil_meses")
+fil_al = st.sidebar.multiselect("Almacén", options=opciones_almacenes, key="fil_al")
+fil_cli = st.sidebar.multiselect("Clientes", options=opciones_clientes, key="fil_cli")
+fil_fa = st.sidebar.multiselect("Familia", options=opciones_familia, key="fil_fa")
 
 # --- Limpieza y traducción de filtros "Todos" ---
 fil_años = años if "Todos" in st.session_state.fil_años else st.session_state.fil_años
