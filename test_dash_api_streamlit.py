@@ -20,7 +20,7 @@ st.set_page_config(
 AUTH0_CLIENT_ID = st.secrets["auth0"]["client_id"]
 AUTH0_CLIENT_SECRET = st.secrets["auth0"]["client_secret"]
 AUTH0_DOMAIN = st.secrets["auth0"]["domain"]
-REDIRECT_URI = "https://dashboard-api-stream.streamlit.app/"
+REDIRECT_URI = "http://10.10.21.53:8501"
 
 # --- URLs de Auth0 ---
 AUTH0_AUTHORIZE_URL = f"https://{AUTH0_DOMAIN}/authorize"
@@ -108,26 +108,28 @@ if "welcome_shown" not in st.session_state:
     st.session_state.welcome_shown = True  # Evita que vuelva a mostrarse
 
 # --- Función para crear el gráfico de dona ---
-def donut_plotly(percentage, color_palette):
-    if color_palette == 'green':
-        chart_colors = ['#27AE60', '#12783D']  # Verde
-    elif color_palette == 'red':
-        chart_colors = ['#E74C3C', '#781F16']  # Rojo
-    else:
-        chart_colors = ['#29b5e8', '#155F7A']  #  azul
-
+def donut_plotly(percentage_fac, percentage_can, percentage_no_fac, color_list):
     fig = go.Figure(data=[go.Pie(
-        labels=['CANCELADO', 'FACTURADO'],
-        values=[100 - percentage, percentage],  # corregido: porcentaje facturado
+        labels=['FACTURADO', 'CANCELADO', 'NO FACTURADO'],
+        values=[percentage_fac, percentage_can, percentage_no_fac],
         hole=0.6,
-        marker_colors=chart_colors,
+        marker_colors=color_list,
         textinfo='none'
     )])
 
     fig.add_annotation(
-        text=f"{percentage}%",
-        font_size=24,
-        showarrow=False
+        text=(
+            f"<span style='color:{color_list[0]};'><b>{percentage_fac}%</b> FAC</span><br>"
+            f"<span style='color:{color_list[1]};'><b>{percentage_can}%</b> CAN</span><br>"
+            f"<span style='color:{color_list[2]};'><b>{percentage_no_fac}%</b> NF</span>"
+        ),
+        font_size=14,
+        showarrow=False,
+        align='center',
+        x=0.5,
+        y=0.5,
+        xref='paper',
+        yref='paper'
     )
 
     fig.update_layout(
@@ -139,10 +141,10 @@ def donut_plotly(percentage, color_palette):
 
     return fig
 # Crear motor SQLAlchemy a partir de la URL del archivo secrets.toml
-engine = create_engine(st.secrets['conn']['ebs12'])
+#engine = create_engine(st.secrets['conn']['ebs12'])
 
 # Consulta con cacheo
-@st.cache_data(ttl=120)  # Cachea por 10 minutos
+#@st.cache_data(ttl=120)  # Cachea por 10 minutos
 def obtener_datos():
 
     url_api = st.secrets["auth0"]['api_url']  # url de la api que se consumira
@@ -150,60 +152,135 @@ def obtener_datos():
     response.raise_for_status()
     return pd.DataFrame(response.json())
 
-df = obtener_datos()
+#df = obtener_datos()
 
+# --- Obtener datos con control manual ---
+if "df" not in st.session_state:
+    st.session_state.df = obtener_datos()
+    
+df = st.session_state.df
 
   # Asegurar que fecha sea datetime
 df['FECHA CREACION'] = pd.to_datetime(df['FECHA CREACION'])
 
 # --- Sidebar ---
-#st.sidebar.title('Título Sidebar')
-#st.sidebar.image('https://iscam.com/wp-content/uploads/2023/11/Logo-Pinsa.png', width=100)
-st.sidebar.markdown("<img src='https://iscam.com/wp-content/uploads/2023/11/Logo-Pinsa.png' width='100' style='display: block; margin: 0 auto;'>" , unsafe_allow_html=True)
-st.sidebar.header("⚙️ Configurar filtros")
+
 
 # --- Filtros ---
+
+
+
+# Mostrar meses
+mes_nombre = {1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril", 5: "Mayo", 6: "Junio",
+              7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"}
+
+
 años = sorted(df['FECHA CREACION'].dt.year.unique())
 meses = sorted(df['FECHA CREACION'].dt.month.unique())
+meses_nombre = [mes_nombre[m] for m in meses]
 almacenes = sorted(df['ALMACEN'].unique())
 clientes = sorted(df['CLIENTE'].fillna('Sin cliente').unique())
 familia = sorted(df['FAMILIA'].unique())
 
-fil_año = st.sidebar.selectbox('Año', options=años, index=len(años) - 1)
-fil_mes = st.sidebar.selectbox('Mes', options=meses, index=0)
-
+opciones_años = ["Todos"] + años
+opciones_meses = ["Todos"] + meses_nombre
 opciones_almacenes = ["Todos"] + almacenes
 opciones_clientes = ["Todos"] + clientes
 opciones_familia = ["Todos"] + familia
 
-fil_al = st.sidebar.multiselect('Almacen', options=opciones_almacenes, default="Todos")
-fil_cli = st.sidebar.multiselect('Clientes', options=opciones_clientes, default="Todos")
-fil_fa = st.sidebar.multiselect('Familia', options=opciones_familia, default="Todos")
+# --- Obtener año actual real (último en la lista) ---
+año_actual = años[-1]
+
+# --- Obtener meses del año actual y el último mes ---
+meses_an_actual = sorted(df[df['FECHA CREACION'].dt.year == año_actual]['FECHA CREACION'].dt.month.unique())
+ultimo_mes = meses_an_actual[-1] if meses_an_actual else "Todos"
+
+# --- Valores por defecto ---
+default_filters = {
+    "fil_al": ["Todos"],
+    "fil_cli": ["Todos"],
+    "fil_fa": ["Todos"],
+    "fil_años": [año_actual],  # como lista, ya que multiselect espera lista
+    "fil_meses": [mes_nombre[ultimo_mes]]
+}
+
+
+
+# --- Aplicar valores por defecto si no están inicializados aún ---
+for k, v in default_filters.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
+
+# --- Si se solicitó resetear filtros vía URL, aplicar los valores por defecto antes de renderizar widgets ---
+query_params = st.query_params
+
+# --- Botón para resetear filtros (se ejecuta antes de renderizar widgets) ---
+if st.query_params.get("reset_filtros") == "1":
+    for k, v in default_filters.items():
+        st.session_state[k] = v
+    st.query_params.clear()
+    st.rerun()
+
+# --- Filtros dinámicos ---
+st.sidebar.header("⚙️ Configurar filtros")
+st.sidebar.markdown(
+    "<img src='https://iscam.com/wp-content/uploads/2023/11/Logo-Pinsa.png' width='100' style='display: block; margin: 0 auto;'>",
+    unsafe_allow_html=True
+)
+
+
+    
+
+# --- Selectores visibles ---
+
+#fil_años_sel = st.sidebar.multiselect("Año", options=opciones_años, default=st.session_state.fil_años, key="fil_años") con valor por default
+fil_años_sel = st.sidebar.multiselect("Año", options=opciones_años, key="fil_años")
+fil_meses_nombres = st.sidebar.multiselect("Mes", options=opciones_meses, key="fil_meses")
+fil_al = st.sidebar.multiselect("Almacén", options=opciones_almacenes, key="fil_al")
+fil_cli = st.sidebar.multiselect("Clientes", options=opciones_clientes, key="fil_cli")
+fil_fa = st.sidebar.multiselect("Familia", options=opciones_familia, key="fil_fa")
+
+# --- Limpieza y traducción de filtros "Todos" ---
+fil_años = años if "Todos" in st.session_state.fil_años else st.session_state.fil_años
+
+# Convertir de nombre a número (para aplicar en el filtrado)
+nombre_a_mes = {v: k for k, v in mes_nombre.items()}
+fil_meses = meses if "Todos" in fil_meses_nombres else [nombre_a_mes[m] for m in fil_meses_nombres]
+
+fil_al = [al for al in st.session_state.fil_al if al != "Todos"]
+fil_cli = [cli for cli in st.session_state.fil_cli if cli != "Todos"]
+fil_fa = [fa for fa in st.session_state.fil_fa if fa != "Todos"]
 
 # --- Filtro de datos ---
-df_filtrado = df.copy()
+df_filtrado = df[
+    df['FECHA CREACION'].dt.year.isin(fil_años) &
+    df['FECHA CREACION'].dt.month.isin(fil_meses)
+]
 
-if fil_año:
-    df_filtrado = df_filtrado[df_filtrado['FECHA CREACION'].dt.year == fil_año]
-
-if fil_mes:
-    df_filtrado = df_filtrado[df_filtrado['FECHA CREACION'].dt.month == fil_mes]
-
-if "Todos" not in fil_al:
+if fil_al:
     df_filtrado = df_filtrado[df_filtrado['ALMACEN'].isin(fil_al)]
-
-if "Todos" not in fil_cli:
+if fil_cli:
     df_filtrado = df_filtrado[df_filtrado['CLIENTE'].isin(fil_cli)]
-
-if "Todos" not in fil_fa:
+if fil_fa:
     df_filtrado = df_filtrado[df_filtrado['FAMILIA'].isin(fil_fa)]
+
+# --- Validar si hay datos ---
+if df_filtrado.empty:
+    st.warning("⚠️ No hay datos para los filtros seleccionados.")
+    st.stop()
+
 
 # --- Cálculo de métricas ---
 cantidad_facturada = df_filtrado['CANTIDAD FACTURADA'].fillna(0).astype(int).sum()
 cantidad_ordenes = df_filtrado['CANTIDAD ORDENADA'].fillna(0).astype(int).sum()
 cantidad_cancelada = df_filtrado['CANTIDAD CANCELADA'].fillna(0).astype(int).sum()
+no_facturada_ordenada = cantidad_ordenes-cantidad_facturada 
 
 cantidad_total = cantidad_ordenes + cantidad_cancelada
+
+porcentaje_cancelado = round((cantidad_cancelada / cantidad_total) * 100, 2)
+
+porcentaje_no_facturado = round((no_facturada_ordenada / cantidad_total) * 100, 2)
 
 if cantidad_total > 0:
     porcentaje_facturado = round((cantidad_facturada / cantidad_total) * 100, 2)
@@ -212,15 +289,29 @@ else:
 
 # --- Mostrar gráfico de dona en Sidebar ---
 st.sidebar.subheader("% Cantidad")
-grafico_dona = donut_plotly(porcentaje_facturado,'blue')
+
+color_facturado = "#3498DB"     # azul
+color_cancelado = "#E74C3C"     # rojo
+color_no_facturado = "#F1C40F"  # amarillo
+
+grafico_dona = donut_plotly(
+    porcentaje_facturado,
+    porcentaje_cancelado,
+    porcentaje_no_facturado,
+    [color_facturado, color_cancelado, color_no_facturado]
+)
+
 st.sidebar.plotly_chart(grafico_dona, use_container_width=True)
 
 # --- Métricas principales ---
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 
 col1.metric("CANTIDAD DE FACTURAS", f"{cantidad_facturada:,}")
-col2.metric("CANTIDAD DE ORDENES", f"{cantidad_ordenes:,}")
+col2.metric("CANTIDAD DE ORDENES", f"{cantidad_total:,}")
 col3.metric("CANTIDAD DE CANCELACIONES", f"{cantidad_cancelada:,}")
+col4.metric("CANTIDAD ORDEN NO FACTURADA", f"{no_facturada_ordenada:,}")
+
+
 
 # --- Vista previa de datos ---
 with st.expander('Vista previa de los datos filtrados'):
@@ -262,11 +353,38 @@ fig_top_clientes.update_traces(
 
 # --- Mostrar el gráfico ---
 st.markdown("<h3 style='text-align: center;'>📊 Top 10 Clientes por Cantidad Ordenada</h3>", unsafe_allow_html=True)
-# --- Métricas secundarias orientacion  ---
+st.plotly_chart(fig_top_clientes, use_container_width=True)
+
+# --- Botones de control (reset y refrescar) fuera del sidebar ---
+st.markdown("---")
+st.subheader("🔧 Controles de visualización")
+
 col1, col2 = st.columns(2)
 
-col1.metric("AÑO", f"{fil_año:}")
-col2.metric("MES", f"{fil_mes:}")
+with col1:
+    if st.button("🔁 Resetear filtros", use_container_width=True):
+        st.query_params.update({"reset_filtros": "1"})
+        st.rerun()
 
-# --------SE MUESTRA EL GRAFICO DE BARRAS CON LOS TOP 10 CLIENTES--------------#
-st.plotly_chart(fig_top_clientes, use_container_width=True)
+with col2:
+    if st.button("🔄 Refrescar datos", use_container_width=True):
+        st.session_state.df = obtener_datos()
+        st.rerun()
+
+# --- Mostrar año y mes seleccionados ---
+col1, col2 = st.columns(2)
+
+# Mostrar años
+if "Todos" in st.session_state.fil_años or len(fil_años) == len(años):
+    año_mostrar = "Todos"
+else:
+    año_mostrar = ", ".join(map(str, fil_años))
+
+
+if "Todos" in st.session_state.fil_meses or len(fil_meses) == len(meses):
+    mes_mostrar = "Todos"
+else:
+    mes_mostrar = ", ".join(mes_nombre.get(m, str(m)) for m in fil_meses)
+
+col1.metric("AÑO", año_mostrar)
+col2.metric("MES", mes_mostrar)
