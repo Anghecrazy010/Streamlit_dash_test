@@ -151,6 +151,22 @@ credentials = service_account.Credentials.from_service_account_info(
     dict(st.secrets["json_file"]), scopes=SCOPES)
 drive_service = build('drive', 'v3', credentials=credentials)
 
+# Función para descargar archivo como bytes
+def download_file(service, file_id):
+    from googleapiclient.http import MediaIoBaseDownload
+    import io
+
+    request = service.files().get_media(fileId=file_id)
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+
+    fh.seek(0)
+    return fh
+
 # Obtener archivo único en la carpeta
 def get_single_file_id(service, folder_id):
     query = f"'{folder_id}' in parents and trashed = false"
@@ -170,28 +186,19 @@ st.title("📁 Descarga de Archivo desde Google Drive")
 file_id, message = get_single_file_id(drive_service, FOLDER_ID)
 
 if file_id:
-    download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
     st.success(f"Archivo disponible: {message}")
-    st.markdown(
-        f"""
-        <a href="{download_url}" target="_blank">
-            <button style="
-                background-color:#4CAF50;
-                color:white;
-                padding:10px 16px;
-                border:none;
-                border-radius:5px;
-                cursor:pointer;
-                font-size:16px;">
-                Descargar archivo
-            </button>
-        </a>
-        """,
-        unsafe_allow_html=True
+
+    # Descargar el archivo desde la API y ofrecerlo como botón
+    buffer = download_file(drive_service, file_id)
+
+    st.download_button(
+        label="⬇️ Descargar archivo CSV",
+        data=buffer,
+        file_name=message,
+        mime="text/csv"
     )
 else:
     st.warning(message)
-
 
 # --- Cargar archivo CSV ---
 st.header("📁 Subir archivo CSV")
