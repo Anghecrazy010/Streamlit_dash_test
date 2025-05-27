@@ -6,6 +6,7 @@ import plotly.express as px
 from urllib.parse import urlencode
 import requests
 import time
+import os 
 
 
 # --- Configurar página ---
@@ -17,9 +18,9 @@ st.set_page_config(
 )
 
 # --- Leer secretos ---
-AUTH0_CLIENT_ID = st.secrets["auth0"]["client_id"]
-AUTH0_CLIENT_SECRET = st.secrets["auth0"]["client_secret"]
-AUTH0_DOMAIN = st.secrets["auth0"]["domain"]
+AUTH0_CLIENT_ID = os.environ["AUTH0_CLIENT_ID"]
+AUTH0_CLIENT_SECRET = os.environ["AUTH0_CLIENT_SECRET"]
+AUTH0_DOMAIN = os.environ["AUTH0_DOMAIN"]
 REDIRECT_URI = "http://10.10.21.53:8501/"
 
 # --- URLs de Auth0 ---
@@ -139,7 +140,7 @@ def donut_plotly(percentage, color_palette):
 
     return fig
 # Crear motor SQLAlchemy a partir de la URL del archivo secrets.toml
-engine = create_engine(st.secrets["connections"]["sql"]["ebs12"])
+engine = create_engine(os.environ["EBS12"])
 
 # Consulta con cacheo
 @st.cache_data(ttl=120)  # Cachea por 10 minutos
